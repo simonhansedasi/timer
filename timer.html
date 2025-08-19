@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Time Tracker</title>
+    
+    
+<!-- ======= Styles ======= -->
+
+  <style>
+    body { font-family: Arial; text-align: center; padding: 50px; }
+    input, button { font-size: 18px; margin: 10px; padding: 10px; }
+    button { width: 200px; }
+    #timer { font-size: 36px; margin: 20px; }
+  </style>
+</head>
+    
+    
+    
+    
+    
+<body>
+
+    
+<!-- ======= Timer & Controls ======= -->
+
+<h1>Time Tracker</h1>
+    <div style="margin-bottom:10px; text-align:left; width:300px; margin:auto;">
+    
+            <div style="margin-bottom:5px;">
+        <label for="project"><b>Project</b></label><br>
+        <input type="text" id="project" placeholder="Enter project name" style="width:100%;">
+    </div>
+        
+        
+        
+        <div style="margin-bottom:5px;">
+        <label for="task"><b>Task</b></label><br>
+        <input type="text" id="task" placeholder="Enter task name" style="width:100%;">
+    </div>
+
+</div>
+    
+<br>
+
+<button onclick="startTimer()">▶ Start</button>
+<button onclick="pauseTimer()">⏸ Pause</button>
+<button onclick="endDay()">🛑 End Day</button>
+    
+<div id="clock">00:00:00</div>
+
+<div id="timer">0.0 h </div>
+
+    
+<h2>Current Task:</h2>
+<div id="currentTask">None</div>
+    
+<h2>Current Project:</h2>
+<div id="currentProject">None</div>
+
+    
+    
+
+<h2>Projects Worked Today:</h2>
+<table id="projectLog" border="1" style="margin:auto; font-size:18px; width:90%;">
+  <tr>
+    <th>Project</th>
+    <th>Task</th>
+    <th>Start Time</th>
+    <th>Stop Time</th>
+    <th>Duration</th>
+  </tr>
+</table>
+    
+    
+
+<!-- ======= Scripts ======= -->
+
+<script>
+let startTime = null;
+let timerInterval = null;
+let currentProject = '';
+let currentTask = '';
+let logs = [];
+
+function saveLogsToLocal() {
+    const data = {
+        logs: logs.map(log => ({
+            project: log.project,
+            task: log.task,
+            start: log.start.toISOString(),
+            end: log.end.toISOString(),
+            duration_ms: log.duration_ms
+        })),
+        currentProject: startTime ? currentProject : '',
+        currentTask: startTime ? currentTask : '',
+        startTime: startTime
+    };
+    localStorage.setItem('timeTrackerData', JSON.stringify(data));
+}
+
+function loadLogsFromLocal() {
+    const saved = localStorage.getItem('timeTrackerData');
+    if (!saved) return;
+
+    const data = JSON.parse(saved);
+    logs = (data.logs || []).map(log => ({
+        project: log.project,
+        task: log.task,
+        start: new Date(log.start),
+        end: new Date(log.end),
+        duration_ms: log.duration_ms
+    }));
+
+    startTime = data.startTime || null;
+    currentProject = startTime ? data.currentProject : '';
+    currentTask = startTime ? data.currentTask : '';
+
+    // Start timer interval if a session is running
+    if (startTime && !timerInterval) {
+        timerInterval = setInterval(updateTimer, 1000);
+    }
+
+    updateTimer();
+}
+
+window.onload = loadLogsFromLocal;
+function updateClock() {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2,'0');
+    const minutes = String(now.getMinutes()).padStart(2,'0');
+    const seconds = String(now.getSeconds()).padStart(2,'0');
+    document.getElementById('clock').innerText = `${hours}:${minutes}:${seconds}`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+function formatTime(ms) {
+    let totalSeconds = Math.floor(ms / 1000);
+    const h = String(Math.floor(totalSeconds / 3600)).padStart(2,'0');
+    const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2,'0');
+    const s = String(totalSeconds % 60).padStart(2,'0');
+    return `${h}:${m}:${s}`;
+}
+
+function formatHours(ms) {
+    return (ms / 1000 / 3600).toFixed(1); 
+}
+
+// Start a session
+function startTimer() {
+    const projInput = document.getElementById('project').value.trim();
+    const taskInput = document.getElementById('task').value.trim();
+
+    if (!projInput) {
+        alert("Please enter a project name.");
+        return;
+    }
+
+    if (startTime) pauseTimer();
+
+    currentProject = projInput;
+    currentTask = taskInput || '';
+    startTime = Date.now();
+
+    saveLogsToLocal(); // autosave on start
+
+    if (!timerInterval) {
+        timerInterval = setInterval(updateTimer, 1000);
+    }
+}
+
+// Pause current session
+function pauseTimer() {
+    if (!startTime) return;
+
+    const now = Date.now();
+    const duration = now - startTime;
+
+    logs.push({
+        project: currentProject,
+        task: currentTask,
+        start: new Date(startTime),
+        end: new Date(now),
+        duration_ms: duration
+    });
+
+    startTime = null;
+    currentTask = '';
+    saveLogsToLocal(); // autosave on pause
+    updateTimer();
+}
+
+function updateTimer() {
+    const now = Date.now();
+    let displayTime = startTime ? now - startTime : 0;
+
+    document.getElementById('timer').innerText = formatHours(displayTime) + " h";
+    document.getElementById('currentProject').innerText = currentProject || 'None';
+    document.getElementById('currentTask').innerText = currentTask || 'None';
+
+    const table = document.getElementById('projectLog');
+    table.innerHTML = "<tr><th>Project</th><th>Task</th><th>Start Time</th><th>Stop Time</th><th>Duration (hours)</th></tr>";
+
+    // Running session at top
+    if (startTime) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${currentProject} (running)</td>
+                        <td>${currentTask}</td>
+                        <td>${new Date(startTime).toLocaleTimeString()}</td>
+                        <td>--</td>
+                        <td>${formatHours(displayTime)}</td>`;
+        table.appendChild(tr);
+    }
+
+    // Keep a dictionary to store totals per project+task
+    const totals = {};
+
+    logs.forEach(log => {
+        const key = `${log.project}||${log.task}`;
+        if (!totals[key]) totals[key] = 0;
+        totals[key] += log.duration_ms;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${log.project}</td>
+                        <td>${log.task}</td>
+                        <td>${log.start.toLocaleTimeString()}</td>
+                        <td>${log.end.toLocaleTimeString()}</td>
+                        <td>${formatHours(log.duration_ms)}</td>`;
+        table.appendChild(tr);
+    });
+
+    // Append totals in bold under the logs
+    for (const key in totals) {
+        const [proj, task] = key.split('||');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><b>${proj}</b></td>
+                        <td><b>${task}</b></td>
+                        <td></td>
+                        <td><b>Total</b></td>
+                        <td><b>${formatHours(totals[key])}</b></td>`;
+        table.appendChild(tr);
+    }
+}
+
+
+function endDay() {
+    pauseTimer();
+    if (logs.length === 0) {
+        alert("No time tracked today.");
+        return;
+    }
+
+    let csvContent = "data:text/csv;charset=utf-8,Task,Project,Start,End,Duration(h)\n";
+    logs.forEach(log => {
+        csvContent += `${log.task},${log.project},${log.start.toISOString()},${log.end.toISOString()},${formatHours(log.duration_ms)}\n`;
+    });
+
+    const today = new Date();
+    const filename = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}.csv`;
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    // Clear everything and localStorage
+    logs = [];
+    startTime = null;
+    currentProject = '';
+    currentTask = '';
+    clearInterval(timerInterval);
+    timerInterval = null;
+    localStorage.removeItem('timeTrackerData');
+
+    document.getElementById('task').value = '';
+    document.getElementById('timer').innerText = '0.0 h';
+    document.getElementById('currentProject').innerText = 'None';
+    document.getElementById('currentTask').innerText = 'None';
+    updateTimer();
+
+    alert(`Time log downloaded as ${filename}! Ready for a new day.`);
+}
+
+</script>
+
+</body>
+</html>
