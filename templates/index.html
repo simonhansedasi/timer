@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Time Tracker</title>
+
+  <style>
+    :root {
+      --bg:       #121212;
+      --surface:  #1e1e1e;
+      --border:   #333;
+      --text:     #e0e0e0;
+      --muted:    #888;
+      --accent:   #4a9eff;
+      --btn-bg:   #2a2a2a;
+      --btn-hover:#3a3a3a;
+      --input-bg: #2a2a2a;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial;
+      text-align: center;
+      padding: 50px;
+    }
+
+    h1, h2 { color: var(--text); }
+
+    input, select {
+      background: var(--input-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 18px;
+      margin: 10px;
+      padding: 10px;
+    }
+
+    button {
+      background: var(--btn-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 18px;
+      margin: 10px;
+      padding: 10px;
+      width: 200px;
+      cursor: pointer;
+    }
+
+    button:hover { background: var(--btn-hover); }
+
+    #clock { font-size: 24px; color: var(--muted); margin: 8px; }
+    #timer { font-size: 36px; color: var(--accent); margin: 16px; }
+
+    .tz-row { font-size: 14px; color: var(--muted); margin-bottom: 20px; }
+    .tz-row select { font-size: 14px; padding: 4px 8px; margin: 4px; width: auto; }
+
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid var(--border); padding: 8px 14px; }
+    th { background: var(--surface); }
+    tbody tr:nth-child(even) { background: var(--surface); }
+  </style>
+</head>
+
+<body>
+
+<h1>Time Tracker</h1>
+
+<div class="tz-row">
+  Timezone: <select id="tzSelect" onchange="onTZChange()"></select>
+</div>
+
+<div style="text-align:left; width:300px; margin:auto;">
+  <div style="margin-bottom:5px;">
+    <label for="project"><b>Project</b></label><br>
+    <input type="text" id="project" placeholder="Enter project name" style="width:100%; margin:0;">
+  </div>
+  <div style="margin-bottom:5px; margin-top:10px;">
+    <label for="task"><b>Task</b></label><br>
+    <input type="text" id="task" placeholder="Enter task name" style="width:100%; margin:0;">
+  </div>
+</div>
+
+<br>
+
+<button onclick="startTimer()">&#9654; Start</button>
+<button onclick="pauseTimer()">&#9208; Pause</button>
+<button onclick="endDay()">&#128721; End Day</button>
+<button onclick="clearAll()">&#128465; Clear</button>
+
+<div id="clock">00:00:00</div>
+<div id="timer">0.0 h</div>
+
+<h2>Current Task:</h2>
+<div id="currentTask">None</div>
+
+<h2>Current Project:</h2>
+<div id="currentProject">None</div>
+
+<h2>Projects Worked Today:</h2>
+<table id="projectLog" style="margin:auto; font-size:18px; width:90%;">
+  <thead>
+    <tr>
+      <th>Project</th>
+      <th>Task</th>
+      <th>Start Time</th>
+      <th>Stop Time</th>
+      <th>Duration (hours)</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+let startTime = null;
+let timerInterval = null;
+let currentProject = '';
+let currentTask = '';
+let logs = [];
+let selectedTZ = 'UTC';
+
+function initTZSelect() {
+    const select = document.getElementById('tzSelect');
+    const saved = localStorage.getItem('selectedTZ');
+    const browserOffsetHrs = -Math.round(new Date().getTimezoneOffset() / 60);
+
+    let matched = false;
+    for (let i = 14; i >= -12; i--) {
+        const label = i === 0 ? 'UTC+0' : i > 0 ? `UTC+${i}` : `UTC${i}`;
+        const tzId = i === 0 ? 'UTC' : i > 0 ? `Etc/GMT-${i}` : `Etc/GMT+${Math.abs(i)}`;
+        const opt = document.createElement('option');
+        opt.value = tzId;
+        opt.textContent = label;
+        const shouldSelect = saved ? tzId === saved : i === browserOffsetHrs;
+        if (shouldSelect) { opt.selected = true; selectedTZ = tzId; matched = true; }
+        select.appendChild(opt);
+    }
+
+    // If saved value was an old IANA name that no longer matches, fall back to browser offset
+    if (!matched) {
+        const fallbackTZ = browserOffsetHrs === 0 ? 'UTC'
+            : browserOffsetHrs > 0 ? `Etc/GMT-${browserOffsetHrs}`
+            : `Etc/GMT+${Math.abs(browserOffsetHrs)}`;
+        const opt = select.querySelector(`option[value="${fallbackTZ}"]`);
+        if (opt) { opt.selected = true; selectedTZ = fallbackTZ; }
+    }
+}
+
+function onTZChange() {
+    selectedTZ = document.getElementById('tzSelect').value;
+    localStorage.setItem('selectedTZ', selectedTZ);
+    updateTimer();
+}
+
+function tzTime(date) {
+    return date.toLocaleTimeString('en-US', { timeZone: selectedTZ, hour12: false });
+}
+
+function tzDateTimeForCSV(date) {
+    const p = new Intl.DateTimeFormat('en-CA', {
+        timeZone: selectedTZ,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+    }).formatToParts(date).reduce((acc, { type, value }) => { acc[type] = value; return acc; }, {});
+    return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+
+function tzDateForFilename() {
+    const p = new Intl.DateTimeFormat('en-CA', {
+        timeZone: selectedTZ,
+        year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(new Date()).reduce((acc, { type, value }) => { acc[type] = value; return acc; }, {});
+    return `${p.year}-${p.month}-${p.day}`;
+}
+
+function saveLogsToLocal() {
+    const data = {
+        logs: logs.map(log => ({
+            project: log.project,
+            task: log.task,
+            start: log.start.toISOString(),
+            end: log.end.toISOString(),
+            duration_ms: log.duration_ms
+        })),
+        currentProject: startTime ? currentProject : '',
+        currentTask: startTime ? currentTask : '',
+        startTime: startTime
+    };
+    localStorage.setItem('timeTrackerData', JSON.stringify(data));
+}
+
+function loadLogsFromLocal() {
+    const saved = localStorage.getItem('timeTrackerData');
+    if (!saved) return;
+
+    const data = JSON.parse(saved);
+    logs = (data.logs || []).map(log => ({
+        project: log.project,
+        task: log.task,
+        start: new Date(log.start),
+        end: new Date(log.end),
+        duration_ms: log.duration_ms
+    }));
+
+    startTime = data.startTime || null;
+    currentProject = startTime ? data.currentProject : '';
+    currentTask = startTime ? data.currentTask : '';
+
+    if (startTime && !timerInterval) {
+        timerInterval = setInterval(updateTimer, 1000);
+    }
+
+    updateTimer();
+}
+
+window.onload = function() {
+    initTZSelect();
+    loadLogsFromLocal();
+};
+
+function updateClock() {
+    document.getElementById('clock').innerText = new Date().toLocaleTimeString('en-US', {
+        timeZone: selectedTZ,
+        hour12: false
+    });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+function formatHours(ms) {
+    return (ms / 1000 / 3600).toFixed(1);
+}
+
+function rawHours(ms) {
+    return (ms / 1000 / 3600).toFixed(4);
+}
+
+function roundedHours(ms) {
+    return (Math.round(ms / 1000 / 3600 * 10) / 10).toFixed(1);
+}
+
+function startTimer() {
+    const projInput = document.getElementById('project').value.trim();
+    const taskInput = document.getElementById('task').value.trim();
+
+    if (!projInput) {
+        alert("Please enter a project name.");
+        return;
+    }
+
+    if (startTime) pauseTimer();
+
+    currentProject = projInput;
+    currentTask = taskInput || '';
+    startTime = Date.now();
+
+    saveLogsToLocal();
+
+    if (!timerInterval) {
+        timerInterval = setInterval(updateTimer, 1000);
+    }
+}
+
+function pauseTimer() {
+    if (!startTime) return;
+
+    const now = Date.now();
+    logs.push({
+        project: currentProject,
+        task: currentTask,
+        start: new Date(startTime),
+        end: new Date(now),
+        duration_ms: now - startTime
+    });
+
+    startTime = null;
+    currentTask = '';
+    saveLogsToLocal();
+    updateTimer();
+}
+
+function updateTimer() {
+    const now = Date.now();
+    const displayTime = startTime ? now - startTime : 0;
+
+    document.getElementById('timer').innerText = formatHours(displayTime) + " h";
+    document.getElementById('currentProject').innerText = currentProject || 'None';
+    document.getElementById('currentTask').innerText = currentTask || 'None';
+
+    const tbody = document.querySelector('#projectLog tbody');
+    tbody.innerHTML = '';
+
+    if (startTime) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${currentProject} (running)</td>
+                        <td>${currentTask}</td>
+                        <td>${tzTime(new Date(startTime))}</td>
+                        <td>--</td>
+                        <td>${formatHours(displayTime)}</td>`;
+        tbody.appendChild(tr);
+    }
+
+    const totals = {};
+    logs.forEach(log => {
+        const key = `${log.project}||${log.task}`;
+        if (!totals[key]) totals[key] = 0;
+        totals[key] += log.duration_ms;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${log.project}</td>
+                        <td>${log.task}</td>
+                        <td>${tzTime(log.start)}</td>
+                        <td>${tzTime(log.end)}</td>
+                        <td>${formatHours(log.duration_ms)}</td>`;
+        tbody.appendChild(tr);
+    });
+
+    for (const key in totals) {
+        const [proj, task] = key.split('||');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><b>${proj}</b></td>
+                        <td><b>${task}</b></td>
+                        <td></td>
+                        <td><b>Total</b></td>
+                        <td><b>${formatHours(totals[key])}</b></td>`;
+        tbody.appendChild(tr);
+    }
+}
+
+function endDay() {
+    pauseTimer();
+    if (logs.length === 0) {
+        alert("No time tracked today.");
+        return;
+    }
+
+    let csv = "Project,Task,Start,End,Duration_h,Duration_h_rounded\n";
+    logs.forEach(log => {
+        csv += `${log.project},${log.task},${tzDateTimeForCSV(log.start)},${tzDateTimeForCSV(log.end)},${rawHours(log.duration_ms)},${roundedHours(log.duration_ms)}\n`;
+    });
+
+    const filename = `${tzDateForFilename()}.csv`;
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    resetState();
+    alert(`Time log downloaded as ${filename}! Ready for a new day.`);
+}
+
+function clearAll() {
+    if (logs.length === 0 && !startTime) {
+        alert("Nothing to clear.");
+        return;
+    }
+    if (!confirm("Clear all tracked time? This cannot be undone.")) return;
+    resetState();
+}
+
+function resetState() {
+    logs = [];
+    startTime = null;
+    currentProject = '';
+    currentTask = '';
+    clearInterval(timerInterval);
+    timerInterval = null;
+    localStorage.removeItem('timeTrackerData');
+
+    document.getElementById('task').value = '';
+    document.getElementById('project').value = '';
+    document.getElementById('timer').innerText = '0.0 h';
+    document.getElementById('currentProject').innerText = 'None';
+    document.getElementById('currentTask').innerText = 'None';
+    updateTimer();
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,14 @@
+[Unit]
+Description=Time Tracker
+After=network.target
+
+[Service]
+User=simonhans
+WorkingDirectory=/home/simonhans/coding/timer
+ExecStart=/home/simonhans/coding/timer/venv/bin/python app.py
+Restart=always
+RestartSec=5
+Environment=PORT=5015
+
+[Install]
+WantedBy=multi-user.target
