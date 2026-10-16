@@ -32,3 +32,6 @@ why-physics-works-notes.md
 *.tif
 *.tiff
 *.ico
+
+# Deploy scripts (server addresses), stay local, still sync via rsync
+deploy_*.sh
